@@ -12,6 +12,7 @@ dependencies = [
   "torch",
   "numpy",
   "scipy",
+  "PyWavelets",
   "Pillow",
 ]
 
