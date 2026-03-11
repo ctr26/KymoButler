@@ -439,6 +439,7 @@ def make_track(
     threshold: float,
     seed: Coord,
     vision_module: VisionModuleProtocol | None,
+    max_iterations: int = 10000,
 ) -> Track:
     """Build a complete track starting from a seed point.
 
@@ -450,6 +451,7 @@ def make_track(
         threshold: Decision threshold
         seed: Starting seed coordinate
         vision_module: Vision module network
+        max_iterations: Maximum iterations to prevent infinite loops
 
     Returns:
         Complete track as list of (time, position) coordinates
@@ -477,8 +479,10 @@ def make_track(
     # Start track with seed and first neighbor
     track: list[Coord] = [seed, neighbors[0]]
 
-    # Extend track iteratively
-    while True:
+    # Extend track iteratively with iteration limit
+    iterations = 0
+    while iterations < max_iterations:
+        iterations += 1
         track, backwards_count = get_next_coord(
             track, backwards_count, all_candidates, kym, threshold, vision_module
         )
@@ -509,19 +513,22 @@ def extract_seeds(skeleton: np.ndarray) -> list[Coord]:
     h, w = skeleton.shape
     seeds: list[Coord] = []
 
+    # Convert to int for proper counting
+    skel = skeleton.astype(np.int32)
+
     for r in range(1, h - 1):
         for c in range(1, w - 1):
-            if skeleton[r, c]:
+            if skel[r, c]:
                 # Count 8-neighbors
                 neighbors = (
-                    skeleton[r - 1, c - 1]
-                    + skeleton[r - 1, c]
-                    + skeleton[r - 1, c + 1]
-                    + skeleton[r, c - 1]
-                    + skeleton[r, c + 1]
-                    + skeleton[r + 1, c - 1]
-                    + skeleton[r + 1, c]
-                    + skeleton[r + 1, c + 1]
+                    skel[r - 1, c - 1]
+                    + skel[r - 1, c]
+                    + skel[r - 1, c + 1]
+                    + skel[r, c - 1]
+                    + skel[r, c + 1]
+                    + skel[r + 1, c - 1]
+                    + skel[r + 1, c]
+                    + skel[r + 1, c + 1]
                 )
                 if neighbors == 1:  # Endpoint
                     seeds.append((r, c))
