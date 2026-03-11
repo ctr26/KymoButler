@@ -277,20 +277,49 @@ def bi_kymobutler_track(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[Track]]:
     """Bidirectional tracking stage.
 
-    `vthr`, `vismod`, and `debug` are accepted for API compatibility.
-    """
-    del vthr, vismod, debug
+    Uses the full iterative tracking algorithm from the original KymoButler,
+    not the connected-components shortcut.
 
+    Args:
+        pred: Probability map from segmentation network
+        kym: Raw kymograph
+        kympreproc: Preprocessed kymograph
+        bool_neg: Whether image was negated
+        binthresh: Binarization threshold
+        vthr: Vision module threshold
+        vismod: Vision module network (can be None for fallback mode)
+        min_size: Minimum track size in pixels
+        min_frames: Minimum track duration in frames
+        debug: Enable debug output
+    """
+    del debug  # Not used yet
+
+    from .tracking import bi_track
+
+    # Preprocess segmentation
     out = binarize(pred, binthresh)
     out = smooth_bin(smooth_bin(out))
-    paths = select_components(prune(zhang_suen_thinning(out), iterations=3), min_count=min_size, min_row_span=min_frames)
+    paths = select_components(
+        prune(zhang_suen_thinning(out), iterations=3),
+        min_count=min_size,
+        min_row_span=min_frames,
+    )
 
-    trks = _extract_tracks(paths, min_frames=min_frames)
+    # Run proper iterative tracking algorithm
+    trks = bi_track(
+        kym=kympreproc,
+        segmentation=paths,
+        threshold=vthr,
+        vision_module=vismod,
+        min_size=min_size,
+        min_frames=min_frames,
+    )
+
+    # Post-process tracks
     probs = [1.0 for _ in trks]
-
     trks = _remove_subset_tracks(trks, min_size=min_size)
     trks = _resolve_overlaps(trks, probs=probs[: len(trks)])
-    trks = [t for t in trks if (t[-1][0] - t[0][0]) >= min_frames]
+    trks = [t for t in trks if len(t) > 1 and (t[-1][0] - t[0][0]) >= min_frames]
 
     if trks:
         colored = _tracks_to_overlay(np.zeros_like(kympreproc), trks, seed=11)
