@@ -313,59 +313,69 @@ def get_cand(
     # Get tile
     tile, track_mask, cand_mask, window = get_tile(kym, track[:-1], nearby, dim)
 
+    # Get window offsets for coordinate conversion
+    r0, c0 = window[0].start, window[1].start
+
     # Run vision module if available
     if vision_module is not None:
         pmap = vision_module(tile, track_mask, cand_mask)
         cands = get_cand_from_pmap(pmap, threshold)
+        # Convert to global coordinates
+        cands = [(c[0] + r0, c[1] + c0) for c in cands]
     else:
-        # Fallback: use candidate mask directly
-        cands = [(int(r), int(c)) for r, c in np.argwhere(cand_mask > 0)]
+        # Fallback: use nearby candidates directly (already global coords)
+        cands = list(nearby)
 
-    # Remove coordinates already in track
+    # Remove coordinates already in track (both are now global coords)
     track_set = set(track)
     cands = [c for c in cands if c not in track_set]
 
     if len(cands) <= 2:
         return []
 
-    # Sort by distance to last track point
-    r0, c0 = window[0].start, window[1].start
-    last_in_tile = (last_track[0] - r0, last_track[1] - c0)
-    cands.sort(key=lambda c: np.sqrt((c[0] - last_in_tile[0]) ** 2 + (c[1] - last_in_tile[1]) ** 2))
+    # Sort by distance to last track point (all in global coordinates now)
+    cands.sort(key=lambda c: np.sqrt((c[0] - last_track[0]) ** 2 + (c[1] - last_track[1]) ** 2))
 
-    # Check if candidates are forward in time
+    # Check if candidates are forward in time (global coords)
     cand_arr = np.array(cands)
-    if np.mean(cand_arr[:, 0]) - last_in_tile[0] < -1:
+    if np.mean(cand_arr[:, 0]) - last_track[0] < -1:
         return []
 
     # Sort into continuous path
-    cands = sort_coords(np.array(cands)).tolist()
+    sorted_arr = sort_coords(np.array(cands))
+    cands = [(int(r), int(c)) for r, c in sorted_arr]
 
-    # Pathfinding to fill gaps
-    if cands and np.sqrt((cands[0][0] - last_in_tile[0]) ** 2 + (cands[0][1] - last_in_tile[1]) ** 2) > 1.5:
-        # Build binary for pathfinding
+    # Pathfinding to fill gaps (need to work in tile coords for the binary image)
+    first_cand = cands[0] if cands else None
+    if first_cand and np.sqrt((first_cand[0] - last_track[0]) ** 2 + (first_cand[1] - last_track[1]) ** 2) > 1.5:
+        # Build binary for pathfinding in tile coordinates
         path_bin = np.zeros(tile.shape, dtype=bool)
         for r, c in nearby:
             tr, tc = r - r0, c - c0
             if 0 <= tr < path_bin.shape[0] and 0 <= tc < path_bin.shape[1]:
                 path_bin[tr, tc] = True
 
-        shortpath = find_short_path_image(path_bin, last_in_tile, tuple(cands[0]))
+        # Convert to tile coords for pathfinding
+        last_in_tile = (last_track[0] - r0, last_track[1] - c0)
+        first_in_tile = (first_cand[0] - r0, first_cand[1] - c0)
+        
+        shortpath = find_short_path_image(path_bin, last_in_tile, first_in_tile)
         if shortpath:
+            # Convert shortpath back to global coords
+            shortpath = [(p[0] + r0, p[1] + c0) for p in shortpath]
             cands = shortpath + cands
 
     # Limit to 24 coordinates
     cands = cands[:24]
 
-    # Check again for forward progress
+    # Check again for forward progress (using global coords)
     if cands:
         cand_arr = np.array(cands)
-        if np.mean(cand_arr[:, 0]) - last_in_tile[0] < -1:
+        if np.mean(cand_arr[:, 0]) - last_track[0] < -1:
             return []
 
-    # Convert back to global coordinates
-    result = [(c[0] + r0, c[1] + c0) for c in cands]
-    return result
+    # cands are already in global coordinates
+    return cands
 
 
 def get_next_coord(
